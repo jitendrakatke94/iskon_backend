@@ -1,5 +1,5 @@
 import ResponseModel from "../db/responseObj.js"
-import {logger, getHashPassword, getEncrypt} from "../db/commonRepo.js";
+import {logger, getHashPassword, getEncrypt, verifyToken, isCompared, getToken } from "../db/commonRepo.js";
 import {query, insert} from "../db/db_connection.js";
 
 const login = async (req, res) => {
@@ -7,10 +7,13 @@ const login = async (req, res) => {
     let response={}
     try {
         let userList = await query(`SELECT * FROM users WHERE email='${reqBody.email}'`);
-        logger("jk userList",JSON.stringify(userList));
         if(userList.status&&userList.response.length!=0){
-            if(userList.response[0].password_hash==reqBody.password){
-              response = new ResponseModel(true,"Success",{token:getEncrypt({id:userList.response[0].id,name:userList.response[0].name}),id:userList.response[0].id,name:userList.response[0].name, role:userList.response[0].role});
+            if(isCompared(userList.response[0].password_hash, reqBody.password)){
+              let token = await getToken({
+                email: userList.response[0].email,
+                id: userList.response[0].id,
+              });
+              response = new ResponseModel(true,"Success",{token:token,id:userList.response[0].id,name:userList.response[0].name, role:userList.response[0].role});
             }else{
               response = new ResponseModel(false,"INCORRECT PASSWORD",{message:`Incorrect password`});
             }
@@ -33,7 +36,7 @@ const registartion= async (req, res) => {
       if(listOfUser.status && listOfUser.response.length>0){
         response = new ResponseModel(false,"EMAIL ALREADY IN USE",{message:`Email # Already in use`});
       }else{
-        //   reqBody.password_hash=getHashPassword(reqBody.password_hash);
+          reqBody.password_hash=getHashPassword(reqBody.password_hash);
           await insert(`users`,reqBody);
           response = new ResponseModel(true,"SUCCESS",{message:"User created Successfullly"});
       }
@@ -60,8 +63,51 @@ const userList = async (req, res) => {
     }
     res.status(200).json(response.print());
 }
+
+const tokenVerify = async (req, res, next) => {
+  let response = {};
+  let token;
+  console.log('jjjj', req.headers.authorization)
+  if (req.headers.authorization) {
+    token = req.headers.authorization.replace("Bearer ", "");
+    
+  } else {
+    response = new ResponseModel(false, "User not verify 22", {
+      message: "Authentication failed",
+    });
+    return res.status(401).json(response.print());
+  }
+
+  try {
+    if (!token) {
+        response = new ResponseModel(false, "User is not verify", {
+        message: "Authentication failed",
+      });
+      return res.status(401).json(response.print());
+    } else {
+      console.log('user');
+      const userId = await verifyToken(token);
+      console.log('userId', userId);
+      if (userId) {
+        const queryString = `SELECT * FROM users where id = ${userId.id}`;
+        const userDetails = await query(queryString);
+        console.log("userDetails:", userDetails);
+        if (userDetails.response.length > 0) {
+          req.user = userId;
+          next();
+        }
+      }
+    }
+  } catch (error) {
+    response = new ResponseModel(false, "User not verify333", {
+      message: "Authentication failed",
+    });
+    return res.status(401).json(response.print());
+  }
+};
 export {
     login,
     registartion,
-    userList
+    userList,
+    tokenVerify
 } 
